@@ -19,11 +19,7 @@ import matplotlib.ticker as mticker
 
 
 #Gather the desired stock financial data from yfinance API
-
 Symobl = input("Enter the stock symbol: ")
-
-
-
 symbolTicker = yf.Ticker(Symobl)
 incStat = symbolTicker.income_stmt.transpose()
 totalRevenue = incStat['Total Revenue']
@@ -38,7 +34,7 @@ now = datetime.datetime.now().date().strftime('%Y-%m-%d')
 scaled = MinMaxScaler(feature_range=(0, 1))
 scaled_data = scaled.fit_transform(data['Close'].values.reshape(-1, 1))
 
-
+#Get the previous business day
 def get_previous_business_day():
     today = datetime.datetime.now().date()
     one_day = timedelta(days=1)
