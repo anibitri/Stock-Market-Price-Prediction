@@ -1,6 +1,7 @@
 import pandas as pd
 import yfinance as yf
 import datetime
+from datetime import timedelta
 import numpy as np
 import matplotlib.pyplot as plt
 from tensorflow.keras import regularizers
@@ -14,15 +15,15 @@ from sklearn import preprocessing
 from sklearn.preprocessing import MinMaxScaler
 from matplotlib.dates import DateFormatter
 import matplotlib.ticker as mticker
-from tkinter import *
-from tkinter.ttk import *
-from tkinter.simpledialog import askstring
-from tkinter.messagebox import showinfo
 
 
 
 #Gather the desired stock financial data from yfinance API
-Symobl = askstring("Stock Symbol", "Enter the stock symbol")
+
+Symobl = input("Enter the stock symbol: ")
+
+
+
 symbolTicker = yf.Ticker(Symobl)
 incStat = symbolTicker.income_stmt.transpose()
 totalRevenue = incStat['Total Revenue']
@@ -37,6 +38,14 @@ now = datetime.datetime.now().date().strftime('%Y-%m-%d')
 scaled = MinMaxScaler(feature_range=(0, 1))
 scaled_data = scaled.fit_transform(data['Close'].values.reshape(-1, 1))
 
+
+def get_previous_business_day():
+    today = datetime.datetime.now().date()
+    one_day = timedelta(days=1)
+    previous_day = today - one_day
+    while previous_day.weekday() >= 5: 
+        previous_day -= one_day
+    return previous_day.strftime("%Y-%m-%d")
 
 #Data Preprocessing
 y = data['Close']
@@ -97,7 +106,7 @@ def data_to_window_data(dataframe, firstdate, lastdate, n=3):
 
     return ret_df
 
-window_df = data_to_window_data(data, '2023-01-01', now, n=3)
+window_df = data_to_window_data(data, '2023-01-01', get_previous_business_day(), n=3)
 
 
 def window_data_to_xy(window_df):
@@ -144,11 +153,18 @@ def predict_future_prices(model, last_window, num_predictions):
 last_window = x_test[-1] 
 future_predictions = predict_future_prices(model, last_window, future_prediction_days)
 
-# Print the future predicted prices
-future_dates = pd.date_range(start=dates_test[-1], periods=future_prediction_days+1, freq='D')[1:]
-future_dates = [date.strftime('%m-%d') for date in future_dates]
-for i, pred in enumerate(future_predictions):
-    print(f"Predicted price for {future_dates[i]}: {pred}")
+def predict_future_business_days(future_predictions, future_prediction_days, dates_test):
+    # Generate a range of future business dates
+    future_business_dates = pd.bdate_range(start=dates_test[-1], periods=future_prediction_days+1, freq='B')[1:]
+    future_business_dates = [date.strftime('%m-%d') for date in future_business_dates]
+    
+    # Print the future predicted prices
+    for i, pred in enumerate(future_predictions):
+        print(f"Predicted price for {future_business_dates[i]}: {pred}")
+    
+    return future_business_dates
+
+future_prices = predict_future_business_days(future_predictions, future_prediction_days, dates_test)
 
 
 
@@ -169,7 +185,7 @@ axd['upleft'].set_xlabel('Date')
 axd['upleft'].set_title('Stock Price Prediction for: ' + Symobl)
 
 # Plot for future predictions
-axd['lowleft'].plot(future_dates, future_predictions, c='teal', linestyle='-')
+axd['lowleft'].plot(future_prices, future_predictions, c='teal', linestyle='-', marker='o')
 axd['lowleft'].set_ylabel('Stock Price for')
 axd['lowleft'].set_xlabel('Date')
 axd['lowleft'].set_title(Symobl + 'Stock Price Prediction for the Next 10 Days')
@@ -186,6 +202,3 @@ axd['right'].tick_params(axis='x', labelsize=8, rotation=45)
 axd['right'].yaxis.set_major_formatter(mticker.ScalarFormatter())
 axd['right'].yaxis.set_major_locator(mticker.MaxNLocator(integer=True))
 plt.show()
-
-
-
