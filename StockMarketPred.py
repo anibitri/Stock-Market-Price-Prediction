@@ -1,6 +1,6 @@
 import pandas as pd
 import yfinance as yf
-import datetime
+from datetime import date
 import numpy as np
 import matplotlib.pyplot as plt
 from tensorflow.keras import regularizers
@@ -14,10 +14,7 @@ from sklearn import preprocessing
 from sklearn.preprocessing import MinMaxScaler
 from matplotlib.dates import DateFormatter
 import matplotlib.ticker as mticker
-from tkinter import *
-from tkinter.ttk import *
-from tkinter.simpledialog import askstring
-from tkinter.messagebox import showinfo
+
 
 
 
@@ -25,107 +22,99 @@ from tkinter.messagebox import showinfo
 Symobl = input("Stock Symbol: ")
 symbolTicker = yf.Ticker(Symobl)
 incStat = symbolTicker.get_income_stmt().transpose()
-print(incStat)
 totalRevenue = incStat['TotalRevenue']
 datesIncStat = totalRevenue.index
 datesIncStat = [str(date.date()) for date in datesIncStat]
 data = yf.download(Symobl, period="max")
-
+print(data)
+print(data["Close"])
 
 
 #Global Variables
 prediction_days = 100
 future_prediction_days = 10 
-now = datetime.datetime.now().date().strftime('%Y-%m-%d')
-scaled = MinMaxScaler(feature_range=(0, 1))
-scaled_data = scaled.fit_transform(data['Close'].values.reshape(-1, 1))
-
+now = date.today().strftime('%Y-%m-%d')
 
 #Data Preprocessing
 y = data['Close']
 x = data.drop(['Close'], axis=1)
-def str_to_dt(s):
-    split = s.split('-')
-    year, month, day = int(split[0]), int(split[1]), int(split[2])
-    return datetime.datetime(year=year, month=month, day=day)
 
-def data_to_window_data(dataframe, firstdate, lastdate, n=3):
-    first_date = str_to_dt(firstdate)
-    last_date = str_to_dt(lastdate)
 
-    target_date = first_date
+
+def get_last_valid_trading_day(target_date_str, df):
+    """
+    Finds the most recent valid day in the dataframe's index
+    on or before the target date.
+    """
+    target_date = pd.to_datetime(target_date_str)
+    subset = df.loc[:target_date]
+    if not subset.empty:
+        return subset.index[-1]
+    return None
+
+def create_windowed_dataset(dataframe, start_date_str, end_date_str, n=3, feature_col='Close'):
+    """
+    Creates a windowed dataset for time series forecasting directly into NumPy arrays.
+    
+    This function is more robust, efficient, and readable than the original.
+    """
+    # 1. Use robust helper function to find valid start and end dates
+    start_date = get_last_valid_trading_day(start_date_str, dataframe)
+    end_date = get_last_valid_trading_day(end_date_str, dataframe)
+    
+    if start_date is None or end_date is None:
+        raise ValueError("Could not find valid start or end dates in the dataframe.")
+        
+    # 2. Filter the dataframe to the relevant date range ONCE
+    relevant_data = dataframe.loc[start_date:end_date, feature_col]
     
     dates = []
     X, Y = [], []
 
-    last_time = False
-    while True:
-        df_subset = dataframe.loc[:target_date].tail(n+1)
+    # 3. Iterate efficiently over the pre-filtered data
+    # We start from index 'n' because we need 'n' previous days of history
+    for i in range(n, len(relevant_data)):
+        # Use efficient integer-based slicing (.iloc) on the series
+        window = relevant_data.iloc[i-n:i+1]
         
-        if len(df_subset) != n+1:
-            print(f'Error: Window of size {n} is too large for date {target_date}')
-            return
-
-        values = df_subset['Close'].to_numpy()
-        x, y = values[:-1], values[-1]
-
-        dates.append(target_date)
+        # The first 'n' values are features, the last is the target
+        x, y = window.iloc[:-1].values, window.iloc[-1]
+        
         X.append(x)
         Y.append(y)
+        dates.append(relevant_data.index[i]) # Store the date of the target 'y'
 
-        next_week = dataframe.loc[target_date:target_date+datetime.timedelta(days=7)]
-        next_datetime_str = str(next_week.head(2).tail(1).index.values[0])
-        next_date_str = next_datetime_str.split('T')[0]
-        year_month_day = next_date_str.split('-')
-        year, month, day = year_month_day
-        next_date = datetime.datetime(day=int(day), month=int(month), year=int(year))
-        
-        if last_time:
-            break
-        
-        target_date = next_date
-
-        if target_date == last_date:
-            last_time = True
+    # 4. Convert lists to NumPy arrays with correct shape and type
+    dates = np.array(dates)
+    X = np.array(X, dtype=np.float32)
+    Y = np.array(Y, dtype=np.float32)
     
-    ret_df = pd.DataFrame({})
-    ret_df['Target Date'] = dates
+    # Reshape X for models like LSTMs that expect 3D input: (samples, timesteps, features)
+    X = X.reshape((X.shape[0], X.shape[1], 1))
+    
+    return dates, X, Y
 
-    X = np.array(X)
-    for i in range(0, n):
-        X[:, i]
-        ret_df[f'Target-{n-i}'] = X[:, i]
-
-    ret_df['Target'] = Y
-
-    return ret_df
-
-window_df = data_to_window_data(data, '2023-01-01', now, n=3)
-
-
-def window_data_to_xy(window_df):
-    data_as_np = window_df.to_numpy()
-    dates = data_as_np[:, 0]
-    middle = data_as_np[:, 1:-1]
-    x = middle.reshape(len(dates), middle.shape[1], 1)
-    y = data_as_np[:, -1]
-    return dates, x.astype(np.float32), y.astype(np.float32)
-
-dates, x, y = window_data_to_xy(window_df)
+dates, x, y = create_windowed_dataset(data, start_date_str="2020-01-01", end_date_str=now, n=3, feature_col='Close')
 
 
 #Split the data into training, validation, and test sets
-q80 = int(len(x)*0.85)
-q90 = int(len(x)*0.92)
+q80 = int(len(x)*0.88)
+q90 = int(len(x)*0.93)
 
 dates_train, x_train, y_train = dates[:q80], x[:q80], y[:q80]
 dates_val, x_val, y_val = dates[q80:q90], x[q80:q90], y[q80:q90]
 dates_test, x_test, y_test = dates[q90:], x[q90:], y[q90:]
 
+#Data Normalization
+scaler = MinMaxScaler(feature_range=(0, 1))
+x_train = scaler.fit_transform(x_train.reshape(-1, 1)).reshape(x_train.shape)
+x_val = scaler.transform(x_val.reshape(-1, 1)).reshape(x_val.shape)
+x_test = scaler.transform(x_test.reshape(-1, 1)).reshape(x_test.shape)
+
 #Model training using LSTM
 model = Sequential([layers.Input((3,1)), layers.LSTM(64), layers.Dense(32, activation = 'relu'), layers.Dense(32, activation = 'relu'), layers.Dense(1)])
 model.compile(loss='mse', optimizer = Adam(learning_rate = 0.001), metrics = ['mean_absolute_error'])
-model.fit(x_train, y_train, validation_data = (x_val, y_val), epochs = 150)
+model.fit(x_train, y_train, validation_data = (x_val, y_val), epochs = 100)
 
 train_pred = model.predict(x_train).flatten()
 val_pred = model.predict(x_val).flatten()
