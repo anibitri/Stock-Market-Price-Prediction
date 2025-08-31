@@ -26,13 +26,19 @@ totalRevenue = incStat['TotalRevenue']
 datesIncStat = totalRevenue.index
 datesIncStat = [str(date.date()) for date in datesIncStat]
 data = yf.download(Symobl, period="max")
-print(data)
-print(data["Close"])
+
+def get_company_name(symbol):
+    ticker = yf.Ticker(symbol)
+    return ticker.info.get("displayName", "Unknown Company")
+
+Company_name = get_company_name(Symobl)
+
+print("Company Name: ", Company_name)
 
 
 #Global Variables
 prediction_days = 100
-future_prediction_days = 10 
+future_prediction_days = 14 
 now = date.today().strftime('%Y-%m-%d')
 
 #Data Preprocessing
@@ -120,7 +126,7 @@ train_pred = model.predict(x_train).flatten()
 val_pred = model.predict(x_val).flatten()
 test_pred = model.predict(x_test).flatten()
 
-#Predict the next 10 days of stock prices
+#Predict the next 14 days of stock prices
 def predict_future_prices(model, last_window, num_predictions):
     predictions = []
     current_input = deepcopy(last_window)
