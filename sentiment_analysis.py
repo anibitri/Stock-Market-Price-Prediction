@@ -1,4 +1,5 @@
 import os
+import logging
 import re
 from datetime import date, timedelta
 import tensorflow
@@ -12,6 +13,11 @@ from polygon import RESTClient
 
 load_dotenv()
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY")
+POLYGON_HTTP_DEBUG = os.getenv("POLYGON_HTTP_DEBUG", "1")  # set to "0" to disable
+
+# Basic logger setup
+logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
+logger = logging.getLogger("sentiment")
 
 tokenizer = transformers.AutoTokenizer.from_pretrained("ProsusAI/finbert")
 # Use the sequence classification head to enable sentiment predictions
@@ -31,7 +37,16 @@ sentiment_pipe = transformers.pipeline(
 client = RESTClient(api_key=POLYGON_API_KEY)
 
 end_date = date.today()
-start_date = date.today() - timedelta(days=14)
+start_date = date.today() - timedelta(days=4)
+
+# Limit of requests is 5 per minute for free tier
+TICKER = os.getenv("TICKER", "AAPL")  
+NEWS_LIMIT = int(os.getenv("NEWS_LIMIT", "100"))
+
+def _build_news_url(ticker: str, published_utc: str, limit: int) -> str:
+    # Redact the API key in logs for safety
+    base = "https://api.polygon.io/v2/reference/news"
+    return f"{base}?ticker={ticker}&published_utc={published_utc}&limit={limit}&apiKey=***REDACTED***"
 
 def _clean_text(s: str) -> str:
     if not s:
@@ -50,7 +65,10 @@ for day in pd.date_range(start=start_date, end=end_date):
     daily_sentiment = {'date': day_str, 'positive': 0, 'negative': 0, 'neutral': 0}
 
     # Fetch news once per day
-    daily_news = list(client.list_ticker_news("AAPL", published_utc=day_str, limit=100))
+    if POLYGON_HTTP_DEBUG not in ("0", "false", "False"):
+        logger.info("Polygon request -> list_ticker_news: ticker=%s, published_utc=%s, limit=%s", TICKER, day_str, NEWS_LIMIT)
+        logger.info("URL: %s", _build_news_url(TICKER, day_str, NEWS_LIMIT))
+    daily_news = list(client.list_ticker_news(TICKER, published_utc=day_str, limit=NEWS_LIMIT))
 
     # Collect text inputs (prefer title + description)
     texts = []
@@ -90,6 +108,7 @@ for day in pd.date_range(start=start_date, end=end_date):
     sentiment_count.append(daily_sentiment)
 
 df_sentiment = pd.DataFrame(sentiment_count)
+print(df_sentiment)
 
 if not df_sentiment.empty:
     df_sentiment['date'] = pd.to_datetime(df_sentiment['date'])
